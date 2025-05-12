@@ -1,0 +1,133 @@
+# === train_model.py ===
+import pandas as pd
+import joblib
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder
+
+# Load data
+df = pd.read_csv("patient_data_sample.csv")
+df = df.drop("Patient_ID", axis=1)
+
+# Encode categorical variables
+categorical = ['Gender', 'Blood_Pressure', 'Cholesterol', 'Smoking', 'Family_History', 'Physical_Activity']
+df = pd.get_dummies(df, columns=categorical)
+
+# Encode target
+label_encoder = LabelEncoder()
+df['Disease_Label'] = label_encoder.fit_transform(df['Disease_Predicted'])
+X = df.drop(['Disease_Predicted', 'Disease_Label'], axis=1)
+y = df['Disease_Label']
+
+# Save label encoder
+joblib.dump(label_encoder, 'models/label_encoder.pkl')
+
+# Split and train
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+model = RandomForestClassifier()
+model.fit(X_train, y_train)
+
+# Save model
+joblib.dump(model, 'models/disease_model.pkl')
+print("✅ Model training complete and saved.")
+
+
+# === app.py ===
+from flask import Flask, request, render_template
+import pandas as pd
+import joblib
+
+app = Flask(__name__)
+model = joblib.load("models/disease_model.pkl")
+label_encoder = joblib.load("models/label_encoder.pkl")
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    prediction = None
+    if request.method == "POST":
+        input_data = {
+            "Age": int(request.form["age"]),
+            "BMI": float(request.form["bmi"]),
+            "Glucose_Level": int(request.form["glucose"]),
+            "Gender_" + request.form["gender"]: 1,
+            "Blood_Pressure_" + request.form["bp"]: 1,
+            "Cholesterol_" + request.form["chol"]: 1,
+            "Smoking_" + request.form["smoke"]: 1,
+            "Family_History_" + request.form["history"]: 1,
+            "Physical_Activity_" + request.form["activity"]: 1
+        }
+
+        all_columns = model.feature_names_in_
+        row = {col: 0 for col in all_columns}
+        row.update(input_data)
+        df = pd.DataFrame([row])
+        pred = model.predict(df)[0]
+        prediction = label_encoder.inverse_transform([pred])[0]
+    return render_template("index.html", prediction=prediction)
+
+if __name__ == "__main__":
+    app.run(debug=True)
+
+
+# === templates/index.html ===
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Healthcare Prediction</title>
+</head>
+<body>
+    <h2>Disease Risk Prediction</h2>
+    <form method="POST">
+        Age: <input type="number" name="age"><br>
+        BMI: <input type="number" name="bmi" step="0.1"><br>
+        Glucose Level: <input type="number" name="glucose"><br>
+
+        Gender:
+        <select name="gender">
+            <option value="Female">Female</option>
+            <option value="Male">Male</option>
+        </select><br>
+
+        Blood Pressure:
+        <select name="bp">
+            <option value="120/80">120/80</option>
+            <option value="127/77">127/77</option>
+            <option value="131/73">131/73</option>
+            <option value="156/84">156/84</option>
+            <option value="147/78">147/78</option>
+        </select><br>
+
+        Cholesterol:
+        <select name="chol">
+            <option value="Normal">Normal</option>
+            <option value="High">High</option>
+            <option value="Borderline">Borderline</option>
+        </select><br>
+
+        Smoking:
+        <select name="smoke">
+            <option value="Yes">Yes</option>
+            <option value="No">No</option>
+        </select><br>
+
+        Family History:
+        <select name="history">
+            <option value="Yes">Yes</option>
+            <option value="No">No</option>
+        </select><br>
+
+        Physical Activity:
+        <select name="activity">
+            <option value="Low">Low</option>
+            <option value="Medium">Medium</option>
+            <option value="High">High</option>
+        </select><br><br>
+
+        <button type="submit">Predict</button>
+    </form>
+
+    {% if prediction %}
+        <h3>Prediction: {{ prediction }}</h3>
+    {% endif %}
+</body>
+</html>
